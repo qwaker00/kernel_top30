@@ -13,10 +13,8 @@
 #include <vector>
 #include <thread>
 #include <mutex>
+#include <ctime>
 
-char chars[26 + 26 + 10];
-std::multiset<std::string> top30;
-std::mutex m;
 
 void do_read(int times) {
     while (times-- > 0) {
@@ -37,7 +35,7 @@ void do_read(int times) {
         for (size_t j = 1; j < heap.size(); ++j) {
             if (heap[j] > heap[(j - 1) / 2]) {
                 std::cerr << "FAIL HEAP" << std::endl;
-                abort();
+                std::terminate();
             }
         }
 
@@ -45,43 +43,60 @@ void do_read(int times) {
     }
  }
 
-void do_write(int times) {
+void do_write(int times, const std::vector<std::string>& words) {
     while (times-- > 0) {
-        std::string s;
-        int len = 10 + random() % 300;
-        for (int j = 0; j < len; ++j) s += chars[rand() % sizeof(chars)];
-
         int fd = open("/dev/top30", O_WRONLY);
-        write(fd, s.c_str(), s.length());
-        close(fd);
-
-        if (s.length() > 255) s.resize(255);
-
-        std::lock_guard<std::mutex> guard(m);
-        top30.insert(s);
-        if (top30.size() > 30) {
-            top30.erase(--top30.rbegin().base());
+        const std::string& s = words[times];
+        if (write(fd, s.c_str(), s.length()) != (int)s.length()) {
+            std::terminate();
         }
+        close(fd);
     }
  }
 
 int main(int argc, char** argv) {
+    std::multiset<std::string> top30;
+
+    char chars[26 + 26 + 10];
     int counter = 0;
     for (int i = 0; i < 26; ++i) chars[counter++] = 'a' + i;
     for (int i = 0; i < 26; ++i) chars[counter++] = 'A' + i;
     for (int i = 0; i < 10; ++i) chars[counter++] = '0' + i;
 
     srand(time(0));
-    for (size_t it = 0; it < 1000; ++it) {
-        std::vector< std::thread > t;
+    for (size_t it = 0; it < 20; ++it) {
+        clock_t start_time = clock();
+
+        std::vector< std::vector<std::string> > words;
         for (size_t i = 0; i < 50; ++i) {
-            t.emplace_back(do_write, 50);
+            words.emplace_back();
+            for (size_t j = 0; j < 5000; ++j) {
+                std::string s;
+                int len = 10 + random() % 300;
+                for (int j = 0; j < len; ++j) s += chars[rand() % sizeof(chars)];
+                words.back().emplace_back(s);
+            }
         }
-        for (size_t i = 0; i < 50; ++i) {
-            t.emplace_back(do_read, 50);
+
+        std::vector< std::thread > t;
+        for (size_t i = 0; i < words.size(); ++i) {
+            t.emplace_back(do_write, words[i].size(), std::ref(words[i]));
+            t.emplace_back(do_read, words[i].size());
         }
         for (size_t i = 0; i < t.size(); ++i) {
             t[i].join();
+        }
+
+        for (size_t i = 0; i < words.size(); ++i) {
+            for (auto s : words[i]) {
+                if (s.length() > 255) {
+                    s.resize(255);
+                }
+                top30.insert(s);
+                if (top30.size() > 30) {
+                    top30.erase(--top30.rbegin().base());
+                }
+            }
         }
 
         char buf[512 * 1024];
@@ -124,7 +139,7 @@ int main(int argc, char** argv) {
             return 1;
         }
 
-        std::cerr << "Iter #" << it << " is OK\n";
+        std::cerr << "Iter #" << it << " is OK (" << double(clock() - start_time) / CLOCKS_PER_SEC << "s)\n";
     }
 
     return 0;
