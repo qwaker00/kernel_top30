@@ -27,8 +27,7 @@ void do_read(int times) {
 
         std::multiset<std::string> got_top;
         std::string line;
-        std::string bufStr = std::string(buf, done);
-        std::istringstream ss(bufStr);
+        std::istringstream ss(std::string(buf, done));
         std::vector<std::string> heap;
         while (getline(ss, line)) {
             got_top.insert(line);
