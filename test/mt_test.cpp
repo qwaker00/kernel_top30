@@ -92,9 +92,13 @@ int main(int argc, char** argv) {
                 if (s.length() > 255) {
                     s.resize(255);
                 }
-                top30.insert(s);
-                if (top30.size() > 30) {
-                    top30.erase(--top30.rbegin().base());
+                if (top30.size() == 30) {
+                    if (s < *top30.rbegin()) {
+                        top30.erase(--top30.rbegin().base());
+                        top30.insert(s);
+                    }
+                } else {
+                    top30.insert(s);
                 }
             }
         }
