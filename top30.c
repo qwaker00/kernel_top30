@@ -1,14 +1,11 @@
+#include <linux/fs.h>
 #include <linux/init.h>
 #include <linux/kernel.h>
-#include <linux/module.h>
-
-#include <linux/fs.h>
 #include <linux/miscdevice.h>
+#include <linux/module.h>
+#include <linux/mutex.h>
 #include <linux/slab.h>
 #include <linux/uaccess.h>
-
-//#include <asm/spinlock.h>
-#include <linux/mutex.h>
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Eugene Gritskevich <qwaker.00@gmail.com>");
@@ -56,7 +53,7 @@ static struct mutex history_lock;
 
 static ssize_t top30_read(struct file *file,
                 char __user * out,
-			    size_t size,
+                size_t size,
                 loff_t * off)
 {
     size_t result;
@@ -96,13 +93,13 @@ static ssize_t top30_read(struct file *file,
         goto out_free;
     }
 
-	result = offset;
+    result = offset;
 
  out_free:
     kfree(buf);
 
  out:
-	return result;
+    return result;
 }
 
 static bool history_check_heap(void)
@@ -193,7 +190,7 @@ static ssize_t history_push_heap(struct string* str)
 
 static ssize_t top30_write(struct file *file,
                 const char __user * in,
-			    size_t size,
+                size_t size,
                 loff_t * off)
 {
     ssize_t result;
@@ -212,7 +209,7 @@ static ssize_t top30_write(struct file *file,
         goto out;
     }
 
-	if (copy_from_user(buf_str.ptr, in, buf_str.size)) {
+    if (copy_from_user(buf_str.ptr, in, buf_str.size)) {
         result = -EFAULT;
         goto out_free;
     }
@@ -233,34 +230,34 @@ static ssize_t top30_write(struct file *file,
     string_release(&buf_str);
 
  out:
-	return result;
+    return result;
 }
 
 static struct file_operations top30_fops = {
-	.owner = THIS_MODULE,
-	.read = top30_read,
-	.write = top30_write,
-	.llseek = noop_llseek
+    .owner = THIS_MODULE,
+    .read = top30_read,
+    .write = top30_write,
+    .llseek = noop_llseek
 };
 
 static struct miscdevice top30_misc_device = {
-	.minor = MISC_DYNAMIC_MINOR,
-	.name = "top30",
-	.fops = &top30_fops
+    .minor = MISC_DYNAMIC_MINOR,
+    .name = "top30",
+    .fops = &top30_fops
 };
 
 static int __init top30_init(void)
 {
-	misc_register(&top30_misc_device);
-	printk(KERN_INFO "top30 device has been registered\n");
+    misc_register(&top30_misc_device);
+    printk(KERN_INFO "top30 device has been registered\n");
     mutex_init(&history_lock);
-	return 0;
+    return 0;
 }
 
 static void __exit top30_exit(void)
 {
-	misc_deregister(&top30_misc_device);
-	printk(KERN_INFO "top30 device has been unregistered\n");
+    misc_deregister(&top30_misc_device);
+    printk(KERN_INFO "top30 device has been unregistered\n");
 }
 
 module_init(top30_init);
