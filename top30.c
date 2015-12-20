@@ -19,6 +19,10 @@ struct string {
     size_t size;
 };
 
+struct buffers {
+    struct string read_buf;
+};
+
 static int string_compare(struct string* s1, struct string* s2) {
     size_t common = min(s1->size, s2->size);
     int res = strncmp(s1->ptr, s2->ptr, common);
@@ -42,24 +46,18 @@ static void string_copy(struct string* to, struct string* from) {
 }
 
 static void string_release(struct string* s) {
-    if (s->ptr != NULL) {
-        kfree(s->ptr);
-    }
+    kfree(s->ptr);
+    s->ptr = NULL;
 }
 
 static struct string history[TOP_COUNT];
 static int history_size = 0;
 static struct mutex history_lock;
 
-static ssize_t top30_read(struct file *file,
-                char __user * out,
-                size_t size,
-                loff_t * off)
-{
-    size_t result;
+static ssize_t top30_new_read_buf(struct string* read_buf) {
+    ssize_t result;
     size_t i;
     size_t offset = 0;
-    size_t out_bytes;
     char* buf;
 
     buf = kzalloc(history_size * MAX_WORD_LENGTH, GFP_KERNEL);
@@ -74,29 +72,53 @@ static ssize_t top30_read(struct file *file,
     }
 
     for (i = 0; i < history_size; ++i) {
-        out_bytes = min(size - offset, history[i].size);
-        if (out_bytes == 0) {
-            break;
-        }
-        memcpy(buf + offset, history[i].ptr, out_bytes);
-        offset += out_bytes;
-
-        if (offset < size) {
-            buf[offset++] = '\n';
-        }
+        memcpy(buf + offset, history[i].ptr, history[i].size);
+        offset += history[i].size;
+        buf[offset++] = '\n';
     }
 
     mutex_unlock(&history_lock);
-
-    if (copy_to_user(out, buf, offset)) {
-        result = -EFAULT;
-        goto out_free;
-    }
-
-    result = offset;
+    read_buf->ptr = buf;
+    read_buf->size = offset;
+    return 0;
 
  out_free:
     kfree(buf);
+
+ out:
+    return result;
+}
+
+static ssize_t top30_read(struct file *file,
+                char __user * out,
+                size_t size,
+                loff_t * off)
+{
+    struct buffers* data = file->private_data;
+    size_t read_size;
+    ssize_t result;
+    size_t to_read;
+
+    if (data->read_buf.ptr == NULL) {
+        ssize_t err = top30_new_read_buf(&data->read_buf);
+        if (err) {
+            result = err;
+            goto out;
+        }
+    }
+
+    read_size = data->read_buf.size;
+    if (*off >= read_size) {
+        result = 0;
+    } else {
+        to_read = min(read_size - (size_t)(*off), size);
+        if (copy_to_user(out, data->read_buf.ptr + *off, to_read)) {
+            result = -EFAULT;
+            goto out;
+        }
+        result = to_read;
+        *off += to_read;
+    }
 
  out:
     return result;
@@ -233,10 +255,36 @@ static ssize_t top30_write(struct file *file,
     return result;
 }
 
+static int top30_open(struct inode *inode, struct file *file)
+{
+    int err = 0;
+    struct buffers *buf;
+    buf = kzalloc(sizeof(*buf), GFP_KERNEL);
+    if (unlikely(!buf)) {
+        err = -ENOMEM;
+        goto out;
+    }
+    file->private_data = buf;
+
+ out:
+    return err;
+}
+
+static int top30_release(struct inode *inode, struct file *file)
+{
+    struct buffers *buf = file->private_data;
+    string_release(&buf->read_buf);
+    kfree(buf);
+    return 0;
+}
+
+
 static struct file_operations top30_fops = {
     .owner = THIS_MODULE,
+    .open = top30_open,
     .read = top30_read,
     .write = top30_write,
+    .release = top30_release,
     .llseek = noop_llseek
 };
 

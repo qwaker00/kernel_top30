@@ -14,18 +14,27 @@
 #include <thread>
 #include <mutex>
 #include <ctime>
-
+#include <algorithm>
 
 void do_read(int times) {
     while (times-- > 0) {
         char buf[512 * 1024];
         int fd = open("/dev/top30", O_RDONLY);
-        size_t done = read(fd, buf, sizeof(buf));
+
+        size_t offset = 0;
+        while (true) {
+            size_t to_read = std::min(sizeof(buf) - offset, static_cast<size_t>(rand() % 20 + 5));
+            size_t done = read(fd, buf + offset, to_read);
+            if (!done) {
+                break;
+            }
+            offset += done;
+        }
         close(fd);
 
         std::multiset<std::string> got_top;
         std::string line;
-        std::istringstream ss(std::string(buf, done));
+        std::istringstream ss(std::string(buf, offset));
         std::vector<std::string> heap;
         while (getline(ss, line)) {
             got_top.insert(line);
@@ -54,6 +63,8 @@ void do_write(int times, const std::vector<std::string>& words) {
     }
  }
 
+const int N_THREADS = 20;
+
 int main(int argc, char** argv) {
     std::multiset<std::string> top30;
 
@@ -68,7 +79,7 @@ int main(int argc, char** argv) {
         clock_t start_time = clock();
 
         std::vector< std::vector<std::string> > words;
-        for (size_t i = 0; i < 50; ++i) {
+        for (size_t i = 0; i < N_THREADS; ++i) {
             words.emplace_back();
             for (size_t j = 0; j < 5000; ++j) {
                 std::string s;
