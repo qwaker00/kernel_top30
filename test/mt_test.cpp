@@ -56,7 +56,17 @@ void do_write(int times, const std::vector<std::string>& words) {
     while (times-- > 0) {
         int fd = open("/dev/top30", O_WRONLY);
         const std::string& s = words[times];
-        if (write(fd, s.c_str(), s.length()) != (int)s.length()) {
+        size_t offset = 0;
+        while (offset < s.size()) {
+            size_t to_write = std::min(s.length() - offset, static_cast<size_t>(rand() % 20 + 5));
+            size_t done = write(fd, s.c_str() + offset, to_write);
+            if (!done) {
+                break;
+            }
+            offset += done;
+        }
+        if (offset != std::min(s.length(), (size_t)255)) {
+            std::cerr << "WRITE FAIL\n" << std::endl;
             std::terminate();
         }
         close(fd);

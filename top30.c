@@ -21,6 +21,7 @@ struct string {
 
 struct buffers {
     struct string read_buf;
+    struct string write_buf;
 };
 
 static int string_compare(struct string* s1, struct string* s2) {
@@ -94,10 +95,10 @@ static ssize_t top30_read(struct file *file,
                 size_t size,
                 loff_t * off)
 {
-    struct buffers* data = file->private_data;
     size_t read_size;
     ssize_t result;
     size_t to_read;
+    struct buffers* data = file->private_data;
 
     if (data->read_buf.ptr == NULL) {
         ssize_t err = top30_new_read_buf(&data->read_buf);
@@ -210,46 +211,57 @@ static ssize_t history_push_heap(struct string* str)
     return index;
 }
 
+static ssize_t top30_flush_write_buf(struct string* write_buf)
+{
+    size_t index;
+    ssize_t result;
+
+    if (mutex_lock_interruptible(&history_lock)) {
+        result = -ERESTARTSYS;
+        goto out;
+    }
+
+    index = history_push_heap(write_buf);
+    mutex_unlock(&history_lock);
+
+    if (index >= 0) {
+        write_buf->ptr = NULL;
+        write_buf->size = 0;
+    }
+    result = 0;
+
+ out:
+    return result;
+}
+
 static ssize_t top30_write(struct file *file,
                 const char __user * in,
                 size_t size,
                 loff_t * off)
 {
     ssize_t result;
-    struct string buf_str;
-    ssize_t index;
+    size_t to_write;
+    struct buffers* data = file->private_data;
 
-    if (size >= MAX_WORD_LENGTH) {
-        buf_str.size = MAX_WORD_LENGTH - 1;
-    } else {
-        buf_str.size = size;
+    if (data->write_buf.ptr == NULL) {
+        data->write_buf.ptr = kzalloc(MAX_WORD_LENGTH, GFP_KERNEL);
+        if (unlikely(!data->write_buf.ptr)) {
+            result = -ENOMEM;
+            goto out;
+        }
+        data->write_buf.size = 0;
     }
 
-    buf_str.ptr = kzalloc(buf_str.size, GFP_KERNEL);
-    if (unlikely(!buf_str.ptr)) {
-        result = -ENOMEM;
-        goto out;
+    to_write = min(size, MAX_WORD_LENGTH - data->write_buf.size - 1);
+    if (to_write > 0) {
+        if (copy_from_user(data->write_buf.ptr + data->write_buf.size, in, to_write)) {
+            result = -EFAULT;
+            goto out;
+        }
     }
-
-    if (copy_from_user(buf_str.ptr, in, buf_str.size)) {
-        result = -EFAULT;
-        goto out_free;
-    }
-    result = size;
-
-    if (mutex_lock_interruptible(&history_lock)) {
-        result = -ERESTARTSYS;
-        goto out_free;
-    }
-    index = history_push_heap(&buf_str);
-    mutex_unlock(&history_lock);
-
-    if (index >= 0) {
-        buf_str.ptr = NULL;
-    }
-
- out_free:
-    string_release(&buf_str);
+    result = to_write;
+    *off += to_write;
+    data->write_buf.size += to_write;
 
  out:
     return result;
@@ -272,10 +284,21 @@ static int top30_open(struct inode *inode, struct file *file)
 
 static int top30_release(struct inode *inode, struct file *file)
 {
+    ssize_t result = 0, err;
     struct buffers *buf = file->private_data;
     string_release(&buf->read_buf);
+
+    if (buf->write_buf.ptr != NULL) {
+        err = top30_flush_write_buf(&buf->write_buf);
+        if (err) {
+            result = err;
+        }
+        string_release(&buf->write_buf);
+    }
+
     kfree(buf);
-    return 0;
+
+    return result;
 }
 
 
